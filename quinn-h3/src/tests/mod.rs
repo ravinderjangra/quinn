@@ -8,15 +8,10 @@ use crate::Error;
 mod helpers;
 use helpers::{timeout_join, Helper};
 
-async fn serve_one(mut incoming: IncomingConnection) {
-    let mut incoming_req = incoming
-        .next()
-        .await
-        .expect("connecting")
-        .await
-        .expect("accept");
+async fn serve_one(mut incoming: IncomingConnection) -> Result<(), crate::Error> {
+    let mut incoming_req = incoming.next().await.expect("no accept").await?;
     while let Some(recv_req) = incoming_req.next().await {
-        let (_, _, sender) = recv_req.await.expect("recv_req");
+        let (_, _, sender) = recv_req.await?;
         let body_writer = sender
             .send_response(Response::builder().status(StatusCode::OK).body(()).unwrap())
             .await
@@ -30,6 +25,7 @@ async fn serve_one(mut incoming: IncomingConnection) {
             Err(e) => panic!("response stream close: {}", e),
         }
     }
+    Ok(())
 }
 
 #[tokio::test(threaded_scheduler)]
@@ -42,7 +38,7 @@ async fn incoming_request_stream_ends_on_client_closure() {
     conn.close();
     // After connection closure, IncomingRequest::next() polling should
     // resolve to None, so server_handle will resolve as well.
-    timeout_join(server_handle).await;
+    timeout_join(server_handle).await.unwrap();
 }
 
 #[tokio::test(threaded_scheduler)]
@@ -54,7 +50,7 @@ async fn incoming_request_stream_closed_on_client_drop() {
     let conn = helper.make_connection().await;
     drop(conn);
 
-    timeout_join(server_handle).await;
+    timeout_join(server_handle).await.unwrap();
 }
 
 async fn serve_one_request_client_body(mut incoming: IncomingConnection) -> String {
