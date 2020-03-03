@@ -747,7 +747,10 @@ impl ConnectionInner {
     }
 
     pub(crate) fn check_0rtt(&self) -> Result<(), ()> {
-        if self.inner.is_handshaking() || self.inner.accepted_0rtt() {
+        if self.inner.is_handshaking()
+            || self.inner.accepted_0rtt()
+            || self.inner.side().is_server()
+        {
             Ok(())
         } else {
             Err(())
