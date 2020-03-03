@@ -57,6 +57,8 @@ jobs:
 
   coverage:
     runs-on: ubuntu-latest
+    env:
+      RUST_BACKTRACE: full
     steps:
       - uses: actions/checkout@v1
       - uses: actions-rs/toolchain@v1

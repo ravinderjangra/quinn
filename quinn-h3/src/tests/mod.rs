@@ -156,7 +156,7 @@ async fn zero_rtt_success() {
 async fn zero_rtt_client_forbids_non_idempotent() {
     let mut helper = Helper::new();
     let (_, incoming) = helper.make_server();
-    tokio::spawn(async move { serve_n_0rtt(incoming, 1).await });
+    tokio::spawn(async move { serve_n_0rtt(incoming, 2).await });
 
     let (conn, _) = helper.make_0rtt().await;
     assert!(conn.send_request(post!()).await.is_err());
