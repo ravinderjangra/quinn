@@ -1,8 +1,9 @@
+use bytes::Bytes;
 use futures::{AsyncReadExt, AsyncWriteExt, StreamExt};
 use http::{Request, Response, StatusCode};
 
-use crate::server::IncomingConnection;
 use crate::Error;
+use crate::{proto::frame::DataFrame, server::IncomingConnection};
 
 #[macro_use]
 mod helpers;
@@ -108,4 +109,74 @@ async fn client_send_stream_body() {
     drop(conn);
 
     assert_eq!(timeout_join(server_handle).await, "the body");
+}
+
+async fn serve_n_0rtt(mut incoming: IncomingConnection, n: usize) -> Result<(), crate::Error> {
+    for _ in 0..n {
+        let (mut incoming_req, _) = incoming
+            .next()
+            .await
+            .expect("accept failed")
+            .into_0rtt()
+            .map_err(|_| ())
+            .expect("0rtt failed");
+        while let Some(recv_req) = incoming_req.next().await {
+            let (_, _, sender) = recv_req.await?;
+            let body_writer = sender
+                .send_response(Response::builder().status(StatusCode::OK).body(()).unwrap())
+                .await?;
+            match body_writer.close().await {
+                Ok(()) => {}
+                Err(Error::Write(quinn::WriteError::ConnectionClosed(
+                    quinn::ConnectionError::ApplicationClosed(_),
+                ))) => {}
+                Err(e) => return Err(e),
+            }
+        }
+    }
+    Ok(())
+}
+
+#[tokio::test(threaded_scheduler)]
+async fn zero_rtt_success() {
+    let mut helper = Helper::new();
+    let (_, incoming) = helper.make_server();
+    let server_handle = tokio::spawn(async move { serve_n_0rtt(incoming, 2).await });
+
+    let (conn, zerortt_accepted) = helper.make_0rtt().await;
+    let resp = conn.send_request(get!()).await.expect("request").0.await;
+    assert_matches!(resp.map(|_| ()), Ok(_));
+    assert_matches!(zerortt_accepted.await, true);
+    conn.close();
+
+    assert!(timeout_join(server_handle).await.is_ok());
+}
+
+#[tokio::test(threaded_scheduler)]
+async fn zero_rtt_client_forbids_non_idempotent() {
+    let mut helper = Helper::new();
+    let (_, incoming) = helper.make_server();
+    tokio::spawn(async move { serve_n_0rtt(incoming, 1).await });
+
+    let (conn, _) = helper.make_0rtt().await;
+    assert!(conn.send_request(post!()).await.is_err());
+}
+
+#[tokio::test(threaded_scheduler)]
+async fn zero_rtt_server_forbids_non_idempotent() {
+    let mut helper = Helper::new();
+    let (_, incoming) = helper.make_server();
+    let server_handle = tokio::spawn(async move { serve_n_0rtt(incoming, 2).await });
+
+    let (mut conn, _) = helper.make_fake_0rtt().await;
+    let mut req = conn.post().await;
+    assert_matches!(req.read().await, Some(Err(_)));
+    assert!(req
+        .write(|mut b| DataFrame {
+            payload: Bytes::from("hey")
+        }
+        .encode(&mut b))
+        .await
+        .is_err());
+    assert!(timeout_join(server_handle).await.is_err());
 }
