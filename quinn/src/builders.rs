@@ -222,6 +222,12 @@ impl ClientConfigBuilder {
         self
     }
 
+    /// Enable 0-RTT.
+    pub fn enable_0rtt(&mut self) -> &mut Self {
+        Arc::make_mut(&mut self.config.crypto).enable_early_data = true;
+        self
+    }
+
     /// Begin connecting from `endpoint` to `addr`.
     pub fn build(self) -> ClientConfig {
         self.config
